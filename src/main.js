@@ -10,6 +10,7 @@ import { NetGameScreen }    from './ui/NetGameScreen.js';
 import { GameOver }         from './ui/GameOver.js';
 import { SoundManager }     from './audio/SoundManager.js';
 import { PeerClient }       from './net/PeerClient.js';
+import { CHARACTERS }       from './characters/characters.js';
 
 const app = document.getElementById('app');
 const soundManager = new SoundManager();
@@ -68,34 +69,33 @@ function showNetLobby() {
 
 function showNetGame(myChar) {
   app.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#E8ECEF;font-size:18px">
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#E8ECEF;font-size:18px;background:#2C3E50">
       ⏳ 相手の準備を待っています...
     </div>`;
 
-  import('./characters/characters.js').then(({ CHARACTERS }) => {
-    // リスナーを先に登録してから送信（メッセージを取りこぼさないため）
-    const unsub = net.on('char_selected', ({ charId }) => {
-      unsub();
-      const opponentChar = CHARACTERS.find(c => c.id === charId);
-      if (!opponentChar) return;
-      const s = new NetGameScreen(app, myChar, opponentChar, net, soundManager,
-        showModeSelect, showTitle);
-      swap(s); s.show();
-    });
-
-    net.on('_disconnect', () => {
-      unsub();
-      app.innerHTML = `
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px">
-          <p style="color:#E8ECEF;font-size:18px">接続が切れました</p>
-          <button class="btn btn-primary" id="dc-back">戻る</button>
-        </div>`;
-      document.getElementById('dc-back')?.addEventListener('click', showModeSelect);
-    });
-
-    // リスナー登録後に送信
-    net.send({ type: 'char_selected', charId: myChar.id });
+  // 同期的にリスナー登録 → 送信（非同期ギャップで取りこぼさない）
+  const unsub = net.on('char_selected', ({ charId }) => {
+    unsub();
+    unsubDc();
+    const opponentChar = CHARACTERS.find(c => c.id === charId);
+    if (!opponentChar) return;
+    const s = new NetGameScreen(app, myChar, opponentChar, net, soundManager,
+      showModeSelect, showTitle);
+    swap(s); s.show();
   });
+
+  const unsubDc = net.on('_disconnect', () => {
+    unsub();
+    unsubDc();
+    app.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;background:#2C3E50">
+        <p style="color:#E8ECEF;font-size:18px">接続が切れました</p>
+        <button class="btn btn-primary" id="dc-back">戻る</button>
+      </div>`;
+    document.getElementById('dc-back')?.addEventListener('click', showModeSelect);
+  });
+
+  net.send({ type: 'char_selected', charId: myChar.id });
 }
 
 function showGame(character) {
