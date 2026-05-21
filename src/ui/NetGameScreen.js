@@ -1,5 +1,5 @@
 import { Game } from '../core/Game.js';
-import { BOARD_COLS, BOARD_ROWS, FALL_SPEED } from '../core/constants.js';
+import { BOARD_COLS, BOARD_ROWS } from '../core/constants.js';
 
 const CS   = 25;
 const MINI = CS * 4;
@@ -18,10 +18,11 @@ export class NetGameScreen {
     this.playerGame   = null;
     this.isOver       = false;
 
-    // 相手の状態（受信して描画するだけ）
     this.opponentGrid  = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLS).fill(null));
     this.opponentScore = 0;
     this.opponentDead  = false;
+    this.opponentPiece = null;
+    this._lastPieceSyncTime = 0;
 
     this._keyHandler = this._onKey.bind(this);
     this._unsubs     = [];
@@ -124,22 +125,47 @@ export class NetGameScreen {
     document.getElementById('cpug-to-title').addEventListener('click', () => this._goTitle());
     document.addEventListener('keydown', this._keyHandler);
 
-    // ネットイベント
     this._unsubs.push(
-      this.net.on('board_update',         (msg) => this._onOpponentUpdate(msg)),
-      this.net.on('garbage',              (msg) => this._onReceiveGarbage(msg.count)),
-      this.net.on('game_over',            ()    => this._handleOver('player')),
-      this.net.on('_disconnect',          ()    => this._onDisconnect()),
+      this.net.on('board_update',  (msg) => this._onOpponentUpdate(msg)),
+      this.net.on('piece_update',  (msg) => this._onOpponentPieceUpdate(msg)),
+      this.net.on('garbage',       (msg) => this._onReceiveGarbage(msg.count)),
+      this.net.on('game_over',     ()    => this._handleOver('player')),
+      this.net.on('_disconnect',   ()    => this._onDisconnect()),
     );
 
-    // プレイヤーゲーム
-    this.playerGame = new Game(this.playerChar, {
-      onRender:      () => this._renderPlayer(),
+    this.playerGame = this._createGame();
+    this._renderOpponent();
+
+    this._applyScale();
+    this._addTouchControls();
+    this._resizeHandler = () => this._applyScale();
+    window.addEventListener('resize', this._resizeHandler);
+
+    this.soundManager.playBGM();
+    this.playerGame.start();
+  }
+
+  _createGame() {
+    return new Game(this.playerChar, {
+      onRender: () => {
+        this._renderPlayer();
+        if (!this.isOver) {
+          const now = Date.now();
+          if (now - this._lastPieceSyncTime >= 80) {
+            this._lastPieceSyncTime = now;
+            const p = this.playerGame.currentPiece;
+            this.net.send({
+              type: 'piece_update',
+              cells: p ? p.getCells() : null,
+              color: p ? p.color : null,
+            });
+          }
+        }
+      },
       onScoreUpdate: (sc, lv, ln) => {
         this.pScoreEl.textContent = sc.toLocaleString();
         this.pLevelEl.textContent = lv;
         this.pLinesEl.textContent = ln;
-        // ボード状態を送信
         this.net.send({ type: 'board_update', grid: this.playerGame.board.grid, score: sc });
       },
       onLinesCleared: (n) => {
@@ -152,22 +178,11 @@ export class NetGameScreen {
       },
       onPieceLocked:  () => this.soundManager.playSE('drop'),
       onPieceRotated: () => this.soundManager.playSE('rotate'),
-      onGameOver:     () => {
+      onGameOver: () => {
         this.net.send({ type: 'game_over' });
         this._handleOver('cpu');
       },
     });
-
-    // 相手ボードの初期描画（空）
-    this._renderOpponent();
-
-    this._applyScale();
-    this._addTouchControls();
-    this._resizeHandler = () => this._applyScale();
-    window.addEventListener('resize', this._resizeHandler);
-
-    this.soundManager.playBGM();
-    this.playerGame.start();
   }
 
   _applyScale() {
@@ -225,6 +240,11 @@ export class NetGameScreen {
     this._renderOpponent();
   }
 
+  _onOpponentPieceUpdate({ cells, color }) {
+    this.opponentPiece = cells ? { cells, color } : null;
+    this._renderOpponent();
+  }
+
   _onReceiveGarbage(count) {
     if (this.isOver) return;
     this.playerGame?.addGarbageLines(count);
@@ -271,13 +291,82 @@ export class NetGameScreen {
         </div>
       </div>
       <div class="cpug-result-btns">
+        ${disconnected ? '' : '<button class="btn btn-primary" id="r-rematch">もう一度</button>'}
         <button class="btn btn-secondary" id="r-mode">モード選択</button>
         <button class="btn btn-ghost" id="r-title">タイトルへ</button>
       </div>
     `;
     document.getElementById('cpug-result').style.display = 'flex';
-    document.getElementById('r-mode').addEventListener('click', () => { this._cleanup(); this.onBack(); });
+    document.getElementById('r-rematch')?.addEventListener('click', () => this._requestRematch());
+    document.getElementById('r-mode').addEventListener('click',  () => { this._cleanup(); this.onBack(); });
     document.getElementById('r-title').addEventListener('click', () => { this._cleanup(); this.onTitle(); });
+  }
+
+  // ─── リマッチ ─────────────────────────────────────────────
+  _requestRematch() {
+    document.getElementById('cpug-result-content').innerHTML = `
+      <div style="color:#E8ECEF;font-size:20px;margin-bottom:20px">⏳ 相手を待っています...</div>
+      <button class="btn btn-ghost" id="r-cancel-rematch">キャンセル</button>
+    `;
+
+    let unsubRematch, unsubDc, retryTimer, resolved = false;
+
+    const cleanup = () => {
+      clearInterval(retryTimer);
+      unsubRematch?.();
+      unsubDc?.();
+    };
+
+    unsubRematch = this.net.on('rematch', () => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      this._doRematch();
+    });
+
+    unsubDc = this.net.on('_disconnect', () => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      document.getElementById('cpug-result-content').innerHTML = `
+        <div style="color:#E8ECEF;font-size:18px;margin-bottom:20px">接続が切れました</div>
+        <button class="btn btn-secondary" id="r-back-dc">モード選択へ</button>
+      `;
+      document.getElementById('r-back-dc')?.addEventListener('click', () => { this._cleanup(); this.onBack(); });
+    });
+
+    this.net.send({ type: 'rematch' });
+    retryTimer = setInterval(() => this.net.send({ type: 'rematch' }), 1000);
+
+    document.getElementById('r-cancel-rematch').addEventListener('click', () => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      this._cleanup();
+      this.onBack();
+    });
+  }
+
+  _doRematch() {
+    this.isOver        = false;
+    this.opponentGrid  = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLS).fill(null));
+    this.opponentScore = 0;
+    this.opponentDead  = false;
+    this.opponentPiece = null;
+    this._lastPieceSyncTime = 0;
+
+    document.getElementById('cpug-result').style.display = 'none';
+
+    if (this.pScoreEl) this.pScoreEl.textContent = '0';
+    if (this.pLevelEl) this.pLevelEl.textContent = '1';
+    if (this.pLinesEl) this.pLinesEl.textContent = '0';
+    if (this.cScoreEl) this.cScoreEl.textContent = '0';
+
+    this._renderOpponent();
+
+    this.playerGame = this._createGame();
+    this.soundManager.playBGM();
+    this.playerGame.start();
   }
 
   // ─── お邪魔警告 ──────────────────────────────────────────
@@ -345,7 +434,11 @@ export class NetGameScreen {
 
   _renderOpponent() {
     this._drawBoard(this.cBoardCtx, this.opponentGrid, null, null, null);
-    // NEXTは相手から受信しないので空のまま
+    if (this.opponentPiece && !this.opponentDead) {
+      this.opponentPiece.cells.forEach(([x, y]) => {
+        if (y >= 0) this._drawCell(this.cBoardCtx, x, y, this.opponentPiece.color);
+      });
+    }
     const NH = MINI * 3 + 8;
     this.cNextCtx.fillStyle = '#1a2a3a';
     this.cNextCtx.fillRect(0, 0, MINI, NH);
