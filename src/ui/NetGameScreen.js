@@ -18,10 +18,13 @@ export class NetGameScreen {
     this.playerGame   = null;
     this.isOver       = false;
 
-    this.opponentGrid  = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLS).fill(null));
-    this.opponentScore = 0;
-    this.opponentDead  = false;
-    this.opponentPiece = null;
+    this.opponentGrid     = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLS).fill(null));
+    this.opponentScore    = 0;
+    this.opponentDead     = false;
+    this.opponentPiece    = null;
+    this.opponentNext     = [];
+    this.opponentHold     = null;
+    this.opponentCanHold  = true;
     this._lastPieceSyncTime = 0;
 
     this._keyHandler = this._onKey.bind(this);
@@ -79,6 +82,13 @@ export class NetGameScreen {
             </div>
           </div>
           <div class="cpug-panels">
+            <div class="cpug-col cpug-col-left">
+              <div class="cpug-label">HOLD</div>
+              <canvas id="c-hold" width="${MINI}" height="${MINI}"></canvas>
+              <div class="cpug-stats" style="margin-top:12px">
+                <div class="cpug-stat-item"><div class="cpug-label">SCORE</div><div class="cpug-val font-mono" id="c-score">0</div></div>
+              </div>
+            </div>
             <div class="cpug-board-wrap">
               <canvas id="c-board" width="${BW}" height="${BH}"></canvas>
               <div class="cpug-garbage-alert" id="c-garbage"></div>
@@ -86,9 +96,6 @@ export class NetGameScreen {
             <div class="cpug-col cpug-col-right">
               <div class="cpug-label">NEXT</div>
               <canvas id="c-next" width="${MINI}" height="${NH}"></canvas>
-              <div class="cpug-stats" style="margin-top:12px">
-                <div class="cpug-stat-item"><div class="cpug-label">SCORE</div><div class="cpug-val font-mono" id="c-score">0</div></div>
-              </div>
             </div>
           </div>
         </div>
@@ -114,6 +121,7 @@ export class NetGameScreen {
     this.pHoldCtx  = document.getElementById('p-hold').getContext('2d');
     this.pNextCtx  = document.getElementById('p-next').getContext('2d');
     this.cBoardCtx = document.getElementById('c-board').getContext('2d');
+    this.cHoldCtx  = document.getElementById('c-hold').getContext('2d');
     this.cNextCtx  = document.getElementById('c-next').getContext('2d');
 
     this.pScoreEl = document.getElementById('p-score');
@@ -153,11 +161,18 @@ export class NetGameScreen {
           const now = Date.now();
           if (now - this._lastPieceSyncTime >= 80) {
             this._lastPieceSyncTime = now;
-            const p = this.playerGame.currentPiece;
+            const p    = this.playerGame.currentPiece;
+            const held = this.playerGame.heldPiece;
             this.net.send({
               type: 'piece_update',
-              cells: p ? p.getCells() : null,
-              color: p ? p.color : null,
+              cells:      p    ? p.getCells()            : null,
+              color:      p    ? p.color                 : null,
+              nextPieces: this.playerGame.nextPieces.slice(0, 3).map(n => ({
+                cells: n.getCellsAt(0, 0, 0),
+                color: n.color,
+              })),
+              holdPiece:  held ? { cells: held.getCellsAt(0, 0, 0), color: held.color } : null,
+              canHold:    this.playerGame.canHold,
             });
           }
         }
@@ -188,7 +203,7 @@ export class NetGameScreen {
   _applyScale() {
     const screen = this.container.querySelector('.cpug-screen');
     if (!screen) return;
-    const NATURAL_W = 1018;
+    const NATURAL_W = 1118;
     const scale = Math.min((window.innerWidth - 8) / NATURAL_W, 1);
     screen.style.zoom = scale < 1 ? String(scale) : '';
   }
@@ -240,8 +255,11 @@ export class NetGameScreen {
     this._renderOpponent();
   }
 
-  _onOpponentPieceUpdate({ cells, color }) {
-    this.opponentPiece = cells ? { cells, color } : null;
+  _onOpponentPieceUpdate({ cells, color, nextPieces, holdPiece, canHold }) {
+    this.opponentPiece   = cells ? { cells, color } : null;
+    this.opponentNext    = nextPieces  || [];
+    this.opponentHold    = holdPiece   || null;
+    this.opponentCanHold = canHold !== false;
     this._renderOpponent();
   }
 
@@ -267,7 +285,7 @@ export class NetGameScreen {
   }
 
   _showResult(winner, disconnected = false) {
-    const isWin = winner === 'player';
+    const isWin  = winner === 'player';
     const pScore = this.playerGame?.score ?? 0;
     const cScore = this.opponentScore;
 
@@ -348,22 +366,23 @@ export class NetGameScreen {
   }
 
   _doRematch() {
-    this.isOver        = false;
-    this.opponentGrid  = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLS).fill(null));
-    this.opponentScore = 0;
-    this.opponentDead  = false;
-    this.opponentPiece = null;
+    this.isOver           = false;
+    this.opponentGrid     = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLS).fill(null));
+    this.opponentScore    = 0;
+    this.opponentDead     = false;
+    this.opponentPiece    = null;
+    this.opponentNext     = [];
+    this.opponentHold     = null;
+    this.opponentCanHold  = true;
     this._lastPieceSyncTime = 0;
 
     document.getElementById('cpug-result').style.display = 'none';
-
     if (this.pScoreEl) this.pScoreEl.textContent = '0';
     if (this.pLevelEl) this.pLevelEl.textContent = '1';
     if (this.pLinesEl) this.pLinesEl.textContent = '0';
     if (this.cScoreEl) this.cScoreEl.textContent = '0';
 
     this._renderOpponent();
-
     this.playerGame = this._createGame();
     this.soundManager.playBGM();
     this.playerGame.start();
@@ -439,9 +458,8 @@ export class NetGameScreen {
         if (y >= 0) this._drawCell(this.cBoardCtx, x, y, this.opponentPiece.color);
       });
     }
-    const NH = MINI * 3 + 8;
-    this.cNextCtx.fillStyle = '#1a2a3a';
-    this.cNextCtx.fillRect(0, 0, MINI, NH);
+    this._drawHoldData(this.cHoldCtx, this.opponentHold, this.opponentCanHold);
+    this._drawNextData(this.cNextCtx, this.opponentNext);
     if (this.opponentDead) {
       this.cBoardCtx.fillStyle = 'rgba(0,0,0,0.65)';
       this.cBoardCtx.fillRect(0, 0, CS * BOARD_COLS, CS * BOARD_ROWS);
@@ -548,6 +566,7 @@ export class NetGameScreen {
     ctx.fillRect(x+1,y+CS-3,CS-2,2); ctx.fillRect(x+CS-3,y+1,2,CS-2);
   }
 
+  // 実際のPieceオブジェクトを描画（自分側）
   _drawMini(ctx, piece, slotW, slotH, offsetY) {
     if (!piece) return;
     const cells = piece.getCellsAt(0,0,0);
@@ -563,6 +582,22 @@ export class NetGameScreen {
     });
   }
 
+  // シリアライズ済みデータを描画（相手側）
+  _drawMiniData(ctx, cells, color, slotW, slotH, offsetY) {
+    if (!cells || cells.length === 0) return;
+    const minC = Math.min(...cells.map(([c]) => c)), maxC = Math.max(...cells.map(([c]) => c));
+    const minR = Math.min(...cells.map(([, r]) => r)), maxR = Math.max(...cells.map(([, r]) => r));
+    const cs = Math.floor(MINI / 4 * 0.82);
+    const sx = (slotW - (maxC - minC + 1) * cs) / 2;
+    const sy = offsetY + (slotH - (maxR - minR + 1) * cs) / 2;
+    cells.forEach(([c, r]) => {
+      const dx = sx + (c - minC) * cs, dy = sy + (r - minR) * cs;
+      ctx.fillStyle = color; ctx.fillRect(dx+1, dy+1, cs-2, cs-2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(dx+1, dy+1, cs-2, 2); ctx.fillRect(dx+1, dy+1, 2, cs-2);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(dx+1, dy+cs-3, cs-2, 2);
+    });
+  }
+
   _drawHold(ctx, game) {
     ctx.fillStyle = '#1a2a3a'; ctx.fillRect(0,0,MINI,MINI);
     if (game.heldPiece) {
@@ -572,10 +607,29 @@ export class NetGameScreen {
     }
   }
 
+  _drawHoldData(ctx, holdPiece, canHold) {
+    if (!ctx) return;
+    ctx.fillStyle = '#1a2a3a'; ctx.fillRect(0, 0, MINI, MINI);
+    if (holdPiece) {
+      ctx.globalAlpha = canHold ? 1 : 0.4;
+      this._drawMiniData(ctx, holdPiece.cells, holdPiece.color, MINI, MINI, 0);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   _drawNext(ctx, game) {
     const H = MINI*3+8, slotH = H/3;
     ctx.fillStyle = '#1a2a3a'; ctx.fillRect(0,0,MINI,H);
     game.nextPieces.slice(0,3).forEach((piece,i) => this._drawMini(ctx,piece,MINI,slotH,i*slotH));
+  }
+
+  _drawNextData(ctx, nextPieces) {
+    if (!ctx) return;
+    const H = MINI * 3 + 8, slotH = H / 3;
+    ctx.fillStyle = '#1a2a3a'; ctx.fillRect(0, 0, MINI, H);
+    (nextPieces || []).slice(0, 3).forEach((piece, i) => {
+      this._drawMiniData(ctx, piece.cells, piece.color, MINI, slotH, i * slotH);
+    });
   }
 
   hide() {
