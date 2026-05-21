@@ -73,10 +73,14 @@ function showNetGame(myChar) {
       ⏳ 相手の準備を待っています...
     </div>`;
 
-  // 同期的にリスナー登録 → 送信（非同期ギャップで取りこぼさない）
-  const unsub = net.on('char_selected', ({ charId }) => {
-    unsub();
-    unsubDc();
+  let unsub, unsubDc, retryTimer, matched = false;
+
+  unsub = net.on('char_selected', ({ charId }) => {
+    if (matched) return;
+    matched = true;
+    clearInterval(retryTimer);
+    unsub?.();
+    unsubDc?.();
     const opponentChar = CHARACTERS.find(c => c.id === charId);
     if (!opponentChar) return;
     const s = new NetGameScreen(app, myChar, opponentChar, net, soundManager,
@@ -84,9 +88,10 @@ function showNetGame(myChar) {
     swap(s); s.show();
   });
 
-  const unsubDc = net.on('_disconnect', () => {
-    unsub();
-    unsubDc();
+  unsubDc = net.on('_disconnect', () => {
+    clearInterval(retryTimer);
+    unsub?.();
+    unsubDc?.();
     app.innerHTML = `
       <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:16px;background:#2C3E50">
         <p style="color:#E8ECEF;font-size:18px">接続が切れました</p>
@@ -95,7 +100,11 @@ function showNetGame(myChar) {
     document.getElementById('dc-back')?.addEventListener('click', showModeSelect);
   });
 
+  // Send immediately, then retry every second until we receive the opponent's selection
   net.send({ type: 'char_selected', charId: myChar.id });
+  retryTimer = setInterval(() => {
+    net.send({ type: 'char_selected', charId: myChar.id });
+  }, 1000);
 }
 
 function showGame(character) {
