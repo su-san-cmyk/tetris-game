@@ -110,6 +110,10 @@ export class GameScreen {
     document.getElementById('btn-pause-side').addEventListener('click', () => this._togglePause());
 
     document.addEventListener('keydown', this._keyHandler);
+    this._applyScale();
+    this._addTouchControls();
+    this._resizeHandler = () => this._applyScale();
+    window.addEventListener('resize', this._resizeHandler);
 
     this.game = new Game(this.character, {
       onRender: () => this._render(),
@@ -422,7 +426,60 @@ export class GameScreen {
     });
   }
 
+  _applyScale() {
+    const layout = this.container.querySelector('.game-layout');
+    if (!layout) return;
+    // Natural width: padding(40) + leftPanel(120) + gap(16) + board(300) + gap(16) + rightPanel(120)
+    const NATURAL_W = 612;
+    const scale = Math.min((window.innerWidth - 8) / NATURAL_W, 1);
+    layout.style.zoom = scale < 1 ? String(scale) : '';
+  }
+
+  _addTouchControls() {
+    this._touchPanel?.remove();
+    const hasTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    const tp = document.createElement('div');
+    tp.className = 'touch-controls' + (hasTouch ? ' tc-visible' : '');
+    if (hasTouch) {
+      this.container.querySelector('.game-screen')?.classList.add('has-touch');
+    }
+    tp.innerHTML = `
+      <div class="tc-row">
+        <button class="touch-btn" id="tc-left">◀</button>
+        <button class="touch-btn" id="tc-rotate">↺</button>
+        <button class="touch-btn" id="tc-right">▶</button>
+        <button class="touch-btn touch-btn-hold" id="tc-hold">HOLD</button>
+      </div>
+      <div class="tc-row">
+        <button class="touch-btn" id="tc-soft">SOFT ▼</button>
+        <button class="touch-btn touch-btn-hard" id="tc-hard">HARD DROP</button>
+      </div>
+    `;
+    this.container.appendChild(tp);
+    this._touchPanel = tp;
+
+    this._addRepeat('tc-left', () => this.game?.moveLeft());
+    this._addRepeat('tc-right', () => this.game?.moveRight());
+    this._addRepeat('tc-soft',  () => this.game?.softDrop());
+    document.getElementById('tc-rotate').addEventListener('touchstart', e => { e.preventDefault(); this.game?.rotate(1); }, { passive: false });
+    document.getElementById('tc-hold').addEventListener('touchstart',   e => { e.preventDefault(); this.game?.hold(); },     { passive: false });
+    document.getElementById('tc-hard').addEventListener('touchstart',   e => { e.preventDefault(); this.game?.hardDrop(); }, { passive: false });
+  }
+
+  _addRepeat(id, fn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let iv;
+    el.addEventListener('touchstart', e => { e.preventDefault(); fn(); iv = setInterval(fn, 80); }, { passive: false });
+    const stop = () => clearInterval(iv);
+    el.addEventListener('touchend',    stop);
+    el.addEventListener('touchcancel', stop);
+  }
+
   hide() {
+    this._touchPanel?.remove();
+    this._touchPanel = null;
+    window.removeEventListener('resize', this._resizeHandler);
     this.container.innerHTML = '';
     document.removeEventListener('keydown', this._keyHandler);
     if (this.game) {

@@ -925,3 +925,100 @@ body {
 }
 .nl-code-hint { font-size: 13px; color: var(--color-text-light); }
 .nl-waiting { margin-top: 12px; font-size: 14px; color: var(--color-text-light); }
+
+/* ============ タッチ操作パネル ============ */
+.touch-controls {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(12, 22, 32, 0.97);
+  border-top: 1px solid rgba(255,255,255,0.1);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  flex-direction: column;
+  gap: 8px;
+  backdrop-filter: blur(8px);
+}
+.tc-row {
+  display: flex;
+  gap: 8px;
+}
+.touch-btn {
+  flex: 1;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.9);
+  font-size: 18px;
+  font-weight: 700;
+  padding: 14px 4px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  font-family: inherit;
+  transition: background 0.1s;
+}
+.touch-btn:active { background: rgba(255,255,255,0.26); }
+.touch-btn-hold { font-size: 13px; letter-spacing: 0.5px; }
+.touch-btn-hard {
+  flex: 2;
+  background: rgba(255,184,92,0.15);
+  border-color: rgba(255,184,92,0.4);
+  color: #FFB85C;
+}
+
+.touch-controls.tc-visible { display: flex; }
+
+@media (max-width: 640px) {
+  .game-screen  { overflow: hidden; }
+  .cpug-screen  { overflow: hidden; }
+}
+
+.game-screen.has-touch   { padding-bottom: 130px; align-items: flex-start; }
+.cpug-screen.has-touch   { padding-bottom: 130px; align-items: flex-start; }
+
+/* ============ モバイル レスポンシブ ============ */
+@media (max-width: 520px) {
+  /* タイトル */
+  .title-text    { font-size: 48px; letter-spacing: 4px; }
+  .title-sub     { font-size: 15px; }
+  .title-content { padding: 32px 20px; gap: 24px; }
+  .title-buttons { width: 200px; }
+  .title-controls { display: none; }
+
+  /* モード選択 */
+  .modeselect-screen { padding: 24px 14px; }
+  .mode-card-inner   { padding: 14px 16px; gap: 12px; }
+  .mode-icon-wrap    { width: 44px; height: 44px; border-radius: 10px; }
+  .mode-icon-wrap svg { width: 26px; height: 26px; }
+  .mode-name  { font-size: 16px; }
+  .mode-desc  { font-size: 12px; }
+
+  /* 難易度選択 */
+  .diffselect-screen { padding: 24px 14px; }
+  .diff-cards { gap: 10px; }
+  .diff-card  { padding: 18px 10px; }
+  .diff-icon  { font-size: 36px; }
+  .diff-name  { font-size: 15px; }
+
+  /* キャラ選択 */
+  .charselect-screen { padding: 24px 12px; }
+  .char-cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .char-face  { width: 60px; height: 60px; }
+  .char-name  { font-size: 15px; }
+  .char-desc  { display: none; }
+
+  /* ゲームオーバー */
+  .gameover-content { min-width: unset; width: calc(100% - 32px); padding: 28px 20px; }
+  .gameover-title   { font-size: 36px; }
+  .gameover-buttons { flex-direction: column; width: 100%; }
+
+  /* CPU結果 */
+  .cpug-result-box { min-width: unset; width: calc(100% - 24px); padding: 24px 16px; }
+  .cpug-result-chars { flex-direction: column; gap: 12px; }
+  .cpug-result-banner { font-size: 26px; padding: 8px 20px; }
+  .cpug-result-btns { flex-direction: column; width: 100%; }
+}
