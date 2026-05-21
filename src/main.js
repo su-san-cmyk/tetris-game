@@ -9,11 +9,11 @@ import { NetLobbyScreen }   from './ui/NetLobbyScreen.js';
 import { NetGameScreen }    from './ui/NetGameScreen.js';
 import { GameOver }         from './ui/GameOver.js';
 import { SoundManager }     from './audio/SoundManager.js';
-import { NetClient }        from './net/NetClient.js';
+import { PeerClient }       from './net/PeerClient.js';
 
 const app = document.getElementById('app');
 const soundManager = new SoundManager();
-const net = new NetClient();
+const net = new PeerClient();
 
 let currentScreen   = null;
 let currentMode     = 'solo';

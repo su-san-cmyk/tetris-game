@@ -2,7 +2,7 @@ export class NetLobbyScreen {
   constructor(container, net, onMatched, onBack) {
     this.container = container;
     this.net       = net;
-    this.onMatched = onMatched; // () => void  両者揃ったら呼ぶ
+    this.onMatched = onMatched;
     this.onBack    = onBack;
     this._unsubs   = [];
   }
@@ -17,7 +17,7 @@ export class NetLobbyScreen {
 
         <div class="netlobby-body">
           <!-- 部屋を作る -->
-          <div class="netlobby-card" id="nl-create-card">
+          <div class="netlobby-card">
             <div class="netlobby-card-icon">🏠</div>
             <div class="netlobby-card-label">部屋を作る</div>
             <div class="netlobby-card-desc">ルームコードを友達に教えて待つ</div>
@@ -27,25 +27,24 @@ export class NetLobbyScreen {
           <div class="netlobby-or">または</div>
 
           <!-- 参加する -->
-          <div class="netlobby-card" id="nl-join-card">
+          <div class="netlobby-card">
             <div class="netlobby-card-icon">🚪</div>
             <div class="netlobby-card-label">コードで参加</div>
             <div class="netlobby-card-desc">友達から聞いたコードを入力</div>
             <div class="netlobby-input-row">
               <input class="netlobby-input" id="nl-code" placeholder="ABCD" maxlength="4" autocomplete="off" />
-              <button class="btn btn-secondary" id="nl-join">参加</button>
             </div>
+            <button class="btn btn-secondary" id="nl-join">参加する</button>
           </div>
         </div>
 
-        <!-- ステータス -->
         <div class="netlobby-status" id="nl-status" style="display:none"></div>
       </div>
     `;
 
     document.getElementById('nl-back').addEventListener('click', () => {
       this.net.disconnect();
-      this._unsub();
+      this._cleanup();
       this.onBack();
     });
 
@@ -54,23 +53,34 @@ export class NetLobbyScreen {
     document.getElementById('nl-code').addEventListener('keydown', e => {
       if (e.key === 'Enter') this._join();
     });
-
-    this._unsubs.push(
-      this.net.on('room_created',      ({ code }) => this._onCreated(code)),
-      this.net.on('room_joined',        ()         => this._onJoined()),
-      this.net.on('opponent_joined',    ()         => this._onOpponentJoined()),
-      this.net.on('error',             ({ msg })   => this._setStatus(msg, true)),
-      this.net.on('_disconnect',        ()         => this._setStatus('接続が切れました', true)),
-    );
   }
 
   async _create() {
     this._setStatus('接続中...'); this._lockUI();
     try {
-      await this.net.connect(this.net.wsUrl);
-      this.net.send({ type: 'create_room' });
+      const code = await this.net.createRoom();
+      this._onCreated(code);
+
+      // 相手が接続してきたら対戦開始
+      const unsub = this.net.on('opponent_joined', () => {
+        unsub();
+        this._setStatus('🎮 対戦相手が見つかりました！');
+        this._cleanup();
+        setTimeout(() => this.onMatched(), 600);
+      });
+      this._unsubs.push(unsub);
+
+      // 待機中に切断された場合
+      const unsubDc = this.net.on('_disconnect', () => {
+        unsubDc();
+        this._setStatus('接続が切れました', true);
+        this._unlockUI();
+      });
+      this._unsubs.push(unsubDc);
+
     } catch {
-      this._setStatus('サーバーに接続できませんでした', true); this._unlockUI();
+      this._setStatus('シグナリングサーバーに接続できませんでした', true);
+      this._unlockUI();
     }
   }
 
@@ -79,10 +89,17 @@ export class NetLobbyScreen {
     if (code.length !== 4) { this._setStatus('4文字のコードを入力してください', true); return; }
     this._setStatus('接続中...'); this._lockUI();
     try {
-      await this.net.connect(this.net.wsUrl);
-      this.net.send({ type: 'join_room', code });
-    } catch {
-      this._setStatus('サーバーに接続できませんでした', true); this._unlockUI();
+      await this.net.joinRoom(code);
+      this._setStatus('✅ 対戦相手に接続しました！');
+      this._cleanup();
+      setTimeout(() => this.onMatched(), 600);
+    } catch (err) {
+      const msg = err?.type === 'peer-unavailable'
+        ? '部屋が見つかりません（コードを確認してください）'
+        : '接続できませんでした';
+      this._setStatus(msg, true);
+      this._unlockUI();
+      this.net.disconnect();
     }
   }
 
@@ -97,22 +114,11 @@ export class NetLobbyScreen {
     `);
   }
 
-  _onJoined() {
-    this._setStatus('✅ 入室しました！開始を待っています...');
-  }
-
-  _onOpponentJoined() {
-    this._setStatus('🎮 対戦相手が見つかりました！');
-    this._unsub();
-    setTimeout(() => this.onMatched(), 600);
-  }
-
   _setStatus(html, isError = false) {
     const el = document.getElementById('nl-status');
     if (!el) return;
     el.style.display = 'block';
     el.innerHTML = isError ? `<span class="nl-error">${html}</span>` : html;
-    if (isError) this._unlockUI();
   }
 
   _lockUI() {
@@ -129,13 +135,13 @@ export class NetLobbyScreen {
     });
   }
 
-  _unsub() {
+  _cleanup() {
     this._unsubs.forEach(fn => fn?.());
     this._unsubs = [];
   }
 
   hide() {
-    this._unsub();
+    this._cleanup();
     this.container.innerHTML = '';
   }
 }

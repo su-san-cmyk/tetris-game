@@ -129,7 +129,7 @@ export class NetGameScreen {
       this.net.on('board_update',         (msg) => this._onOpponentUpdate(msg)),
       this.net.on('garbage',              (msg) => this._onReceiveGarbage(msg.count)),
       this.net.on('game_over',            ()    => this._handleOver('player')),
-      this.net.on('opponent_disconnected',()    => this._onDisconnect()),
+      this.net.on('_disconnect',          ()    => this._onDisconnect()),
     );
 
     // プレイヤーゲーム
@@ -161,8 +161,60 @@ export class NetGameScreen {
     // 相手ボードの初期描画（空）
     this._renderOpponent();
 
+    this._applyScale();
+    this._addTouchControls();
+    this._resizeHandler = () => this._applyScale();
+    window.addEventListener('resize', this._resizeHandler);
+
     this.soundManager.playBGM();
     this.playerGame.start();
+  }
+
+  _applyScale() {
+    const screen = this.container.querySelector('.cpug-screen');
+    if (!screen) return;
+    const NATURAL_W = 1018;
+    const scale = Math.min((window.innerWidth - 8) / NATURAL_W, 1);
+    screen.style.zoom = scale < 1 ? String(scale) : '';
+  }
+
+  _addTouchControls() {
+    this._touchPanel?.remove();
+    const hasTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    const tp = document.createElement('div');
+    tp.className = 'touch-controls' + (hasTouch ? ' tc-visible' : '');
+    if (hasTouch) this.container.querySelector('.cpug-screen')?.classList.add('has-touch');
+    tp.innerHTML = `
+      <div class="tc-row">
+        <button class="touch-btn" id="tc-left">◀</button>
+        <button class="touch-btn" id="tc-rotate">↺</button>
+        <button class="touch-btn" id="tc-right">▶</button>
+        <button class="touch-btn touch-btn-hold" id="tc-hold">HOLD</button>
+      </div>
+      <div class="tc-row">
+        <button class="touch-btn" id="tc-soft">SOFT ▼</button>
+        <button class="touch-btn touch-btn-hard" id="tc-hard">HARD DROP</button>
+      </div>
+    `;
+    this.container.appendChild(tp);
+    this._touchPanel = tp;
+
+    this._addRepeat('tc-left', () => this.playerGame?.moveLeft());
+    this._addRepeat('tc-right', () => this.playerGame?.moveRight());
+    this._addRepeat('tc-soft',  () => this.playerGame?.softDrop());
+    document.getElementById('tc-rotate').addEventListener('touchstart', e => { e.preventDefault(); this.playerGame?.rotate(1); }, { passive: false });
+    document.getElementById('tc-hold').addEventListener('touchstart',   e => { e.preventDefault(); this.playerGame?.hold(); },     { passive: false });
+    document.getElementById('tc-hard').addEventListener('touchstart',   e => { e.preventDefault(); this.playerGame?.hardDrop(); }, { passive: false });
+  }
+
+  _addRepeat(id, fn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let iv;
+    el.addEventListener('touchstart', e => { e.preventDefault(); fn(); iv = setInterval(fn, 80); }, { passive: false });
+    const stop = () => clearInterval(iv);
+    el.addEventListener('touchend',    stop);
+    el.addEventListener('touchcancel', stop);
   }
 
   // ─── ネットイベント ───────────────────────────────────────
@@ -433,5 +485,11 @@ export class NetGameScreen {
     game.nextPieces.slice(0,3).forEach((piece,i) => this._drawMini(ctx,piece,MINI,slotH,i*slotH));
   }
 
-  hide() { this._cleanup(); this.container.innerHTML = ''; }
+  hide() {
+    this._touchPanel?.remove();
+    this._touchPanel = null;
+    window.removeEventListener('resize', this._resizeHandler);
+    this._cleanup();
+    this.container.innerHTML = '';
+  }
 }
