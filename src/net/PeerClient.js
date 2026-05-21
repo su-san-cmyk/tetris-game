@@ -12,6 +12,7 @@ export class PeerClient {
     this.peer     = null;
     this.conn     = null;
     this.handlers = {};
+    this._buffer  = []; // リスナー未登録のメッセージを一時保持
   }
 
   // ホスト: 部屋を作る → Promise<code>
@@ -99,6 +100,10 @@ export class PeerClient {
   on(type, handler) {
     if (!this.handlers[type]) this.handlers[type] = [];
     this.handlers[type].push(handler);
+    // リスナー登録前に届いていたメッセージを即時配送
+    const pending = this._buffer.filter(m => m.type === type);
+    this._buffer  = this._buffer.filter(m => m.type !== type);
+    pending.forEach(m => handler(m));
     return () => this.off(type, handler);
   }
 
@@ -108,7 +113,12 @@ export class PeerClient {
   }
 
   _emit(type, data) {
-    (this.handlers[type] || []).forEach(h => h(data));
+    const handlers = this.handlers[type] || [];
+    if (handlers.length === 0) {
+      this._buffer.push(data); // リスナーがいなければバッファに積む
+    } else {
+      handlers.forEach(h => h(data));
+    }
   }
 
   send(obj) {
@@ -121,5 +131,6 @@ export class PeerClient {
     this.conn     = null;
     this.peer     = null;
     this.handlers = {};
+    this._buffer  = [];
   }
 }

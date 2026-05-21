@@ -67,14 +67,13 @@ function showNetLobby() {
 }
 
 function showNetGame(myChar) {
-  net.send({ type: 'char_selected', charId: myChar.id });
-
   app.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#E8ECEF;font-size:18px">
       ⏳ 相手の準備を待っています...
     </div>`;
 
   import('./characters/characters.js').then(({ CHARACTERS }) => {
+    // リスナーを先に登録してから送信（メッセージを取りこぼさないため）
     const unsub = net.on('char_selected', ({ charId }) => {
       unsub();
       const opponentChar = CHARACTERS.find(c => c.id === charId);
@@ -93,6 +92,9 @@ function showNetGame(myChar) {
         </div>`;
       document.getElementById('dc-back')?.addEventListener('click', showModeSelect);
     });
+
+    // リスナー登録後に送信
+    net.send({ type: 'char_selected', charId: myChar.id });
   });
 }
 
